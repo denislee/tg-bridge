@@ -13,15 +13,21 @@ import (
 
 // Server wraps http.Server with the bridge and config.
 type Server struct {
-	cfg    *config.Config
-	log    *slog.Logger
-	br     *bridge.Bridge
-	http   *http.Server
+	cfg     *config.Config
+	log     *slog.Logger
+	br      *bridge.Bridge
+	http    *http.Server
+	authRL  *rateLimiter
 }
 
 func New(cfg *config.Config, log *slog.Logger, br *bridge.Bridge, cert tls.Certificate) *Server {
 	mux := http.NewServeMux()
-	s := &Server{cfg: cfg, log: log, br: br}
+	s := &Server{
+		cfg:    cfg,
+		log:    log,
+		br:     br,
+		authRL: newRateLimiter(10, 5), // 10/min, burst 5 — brute-force brake for auth
+	}
 	s.registerRoutes(mux)
 
 	s.http = &http.Server{
@@ -34,11 +40,13 @@ func New(cfg *config.Config, log *slog.Logger, br *bridge.Bridge, cert tls.Certi
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
-	// Auth flow (no bearer required — the token is what auth establishes).
-	mux.HandleFunc("GET /v1/auth/status", s.handleAuthStatus)
-	mux.HandleFunc("POST /v1/auth/phone", s.handleAuthPhone)
-	mux.HandleFunc("POST /v1/auth/code", s.handleAuthCode)
-	mux.HandleFunc("POST /v1/auth/password", s.handleAuthPassword)
+	// Auth flow — bearer required (any configured client token works) and
+	// per-IP rate limited so a stolen hostname can't brute-force SMS codes
+	// or 2FA passwords if the bridge is exposed to the internet.
+	mux.Handle("GET /v1/auth/status", s.withAuth(s.withRateLimit(s.authRL, s.handleAuthStatus)))
+	mux.Handle("POST /v1/auth/phone", s.withAuth(s.withRateLimit(s.authRL, s.handleAuthPhone)))
+	mux.Handle("POST /v1/auth/code", s.withAuth(s.withRateLimit(s.authRL, s.handleAuthCode)))
+	mux.Handle("POST /v1/auth/password", s.withAuth(s.withRateLimit(s.authRL, s.handleAuthPassword)))
 
 	// Bearer-protected endpoints.
 	mux.Handle("GET /v1/me", s.withAuth(s.handleMe))
