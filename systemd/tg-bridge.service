@@ -1,0 +1,30 @@
+[Unit]
+Description=tg-bridge (Telegram MTProto ↔ embedded HTTP bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tgbridge
+Group=tgbridge
+WorkingDirectory=/opt/tg-bridge
+ExecStart=/opt/tg-bridge/tg-bridge --config /opt/tg-bridge/config.yaml
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tg-bridge/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+# tg-bridge configuration
+listen: ":8443"
+
+tls:
+  # When auto=true the bridge generates a self-signed cert on first start
+  # and writes it to cert_path/key_path. Fingerprint is logged so you can
+  # pin it in the ESP32 firmware.
+  auto: true
+  cert_path: "./data/cert.pem"
+  key_path:  "./data/key.pem"
+  # Subject Alt Names baked into the generated cert.
+  hosts:
+    - "localhost"
+    - "127.0.0.1"
+    # - "192.168.1.42"
+    # - "tg-bridge.lan"
+
+telegram:
+  # Obtain from https://my.telegram.org/apps
+  api_id:   0
+  api_hash: ""
+  session_dir: "./data/session"
+
+# Bearer tokens the ESP32 presents in the Authorization header.
+# Generate with: openssl rand -hex 32
+clients:
+  - name:  "tlora-pager"
+    token: "REPLACE_ME_WITH_A_LONG_RANDOM_STRING"
+    # Optional allow-list of chat IDs. Empty = all chats.
+    allowed_chats: []
+
+# Media cache (photos only for now)
+media:
+  cache_dir: "./data/media"
+  max_bytes: 104857600   # 100 MiB
+
+log_level: "info"
