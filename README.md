@@ -45,22 +45,23 @@ make build-armv7  # Raspberry Pi 2/3 (32-bit OS)
 ## First-time login
 
 Do this from a laptop, not the device. The session is persisted; subsequent
-starts skip this flow.
+starts skip this flow. All auth endpoints require a bearer token (any one
+of the tokens in `clients[]` works) and are rate-limited per source IP.
 
 ```bash
 BASE=https://localhost:8443
-curl -k $BASE/v1/auth/status
+TOKEN="your-configured-bearer-token"
+H="Authorization: Bearer $TOKEN"
+
+curl -k -H "$H" $BASE/v1/auth/status
 # → {"state":"need_phone"}
 
-curl -k -X POST $BASE/v1/auth/phone  -d '{"phone":"+15551234567"}'
-curl -k $BASE/v1/auth/status
-# → {"state":"need_code"}
-
-curl -k -X POST $BASE/v1/auth/code   -d '{"code":"12345"}'
+curl -k -H "$H" -X POST $BASE/v1/auth/phone    -d '{"phone":"+15551234567"}'
+curl -k -H "$H" -X POST $BASE/v1/auth/code     -d '{"code":"12345"}'
 # If 2FA is enabled:
-curl -k -X POST $BASE/v1/auth/password -d '{"password":"..."}'
+curl -k -H "$H" -X POST $BASE/v1/auth/password -d '{"password":"..."}'
 
-curl -k $BASE/v1/auth/status
+curl -k -H "$H" $BASE/v1/auth/status
 # → {"state":"authorized"}
 ```
 
@@ -92,15 +93,70 @@ Chat IDs follow the Bot API convention:
 On first launch the bridge logs the cert SHA-256. Bake it into the firmware
 and verify on connect instead of accepting any CA.
 
+## Internet-facing deployment
+
+The ESP32 needs the bridge reachable over the public internet when the
+device roams off home Wi-Fi. The recommended setup is a small VPS
+(Hetzner CX11, Vultr $5, etc — 1 vCPU / 1 GB RAM is plenty).
+
+**Deploy:**
+
+```bash
+scp bin/tg-bridge-linux-arm64 root@vps:/opt/tg-bridge/tg-bridge
+scp config.yaml                root@vps:/opt/tg-bridge/config.yaml
+scp systemd/tg-bridge.service  root@vps:/etc/systemd/system/
+ssh root@vps 'systemctl daemon-reload && systemctl enable --now tg-bridge'
+```
+
+**Harden before exposing port 8443:**
+
+1. `tls.hosts` in `config.yaml` must include the public hostname **or**
+   IP that the ESP32 will dial. Otherwise the cert fingerprint still
+   pins, but SNI / SAN mismatches will show up in logs.
+2. `clients[].token` is the only thing standing between the open
+   internet and your Telegram account. Use at least 32 bytes of entropy
+   (`openssl rand -hex 32`) and never reuse the token across devices.
+3. Firewall: only `8443/tcp` inbound. Outbound is unrestricted (MTProto
+   uses a rotating set of Telegram IPs).
+4. Auth endpoints are rate-limited to 10 requests/minute per IP — that
+   covers SMS-code brute-force. Telegram itself rate-limits further.
+5. On login, the bridge persists `session_dir/session.json` — the session
+   token that *is* your account access. Treat it like a password:
+   `chmod 600`, back up only encrypted, and if leaked terminate the
+   session from an official Telegram client.
+
+**Token rotation:** edit `config.yaml`, `systemctl restart tg-bridge`.
+Old tokens stop working immediately.
+
+**Revoking a stolen device:** same — remove the token, restart.
+
+**Logging of source IPs** for every request goes to stderr (captured by
+journald on systemd). Useful as a fail2ban input later.
+
 ## Deploy (systemd)
+
+One-shot deploy script covers everything: cross-compile, upload, install,
+restart, and print the cert fingerprint you need to pin in firmware.
+
+```bash
+scripts/deploy.sh pi@rpi.local                     # defaults to arm64
+scripts/deploy.sh pi@rpi.local --arch=armv7        # 32-bit Pi OS
+scripts/deploy.sh user@vps --arch=amd64            # cheap VPS
+```
+
+Re-running is idempotent and performs an in-place update. Passwordless
+sudo is required on the remote host.
+
+Manual deploy if you prefer:
 
 ```bash
 sudo useradd --system --home /opt/tg-bridge --shell /usr/sbin/nologin tgbridge
 sudo install -d -o tgbridge -g tgbridge /opt/tg-bridge/data
 sudo install -o tgbridge -g tgbridge bin/tg-bridge-linux-arm64 /opt/tg-bridge/tg-bridge
-sudo install -o tgbridge -g tgbridge config.yaml /opt/tg-bridge/config.yaml
+sudo install -o tgbridge -g tgbridge -m 600 config.yaml /opt/tg-bridge/config.yaml
 sudo cp systemd/tg-bridge.service /etc/systemd/system/
 sudo systemctl enable --now tg-bridge
+sudo journalctl -u tg-bridge -f    # watch for the cert SHA-256 fingerprint
 ```
 
 ## License
