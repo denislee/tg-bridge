@@ -13,7 +13,6 @@ import (
 
 	"github.com/gotd/contrib/bbolt"
 	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
@@ -143,8 +142,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		b.sender = message.NewSender(b.api)
 		b.clientReady.Store(true)
 
-		flow := auth.NewFlow(b.auth, auth.SendCodeOptions{})
-		if err := b.client.Auth().IfNecessary(ctx, flow); err != nil {
+		if err := b.runAuth(ctx); err != nil {
 			b.auth.setState(AuthError, err)
 			return fmt.Errorf("auth: %w", err)
 		}

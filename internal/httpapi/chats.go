@@ -23,6 +23,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
+	if s.br.Self() == nil {
+		writeError(w, http.StatusServiceUnavailable, "not authorized yet")
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	chats, err := s.br.ListChats(r.Context(), limit)
 	if err != nil {
@@ -47,6 +51,10 @@ func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
+	if s.br.Self() == nil {
+		writeError(w, http.StatusServiceUnavailable, "not authorized yet")
+		return
+	}
 	chatID, err := pathChatID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -68,6 +76,10 @@ func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
+	if s.br.Self() == nil {
+		writeError(w, http.StatusServiceUnavailable, "not authorized yet")
+		return
+	}
 	chatID, err := pathChatID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -93,6 +105,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {
+	if s.br.Self() == nil {
+		writeError(w, http.StatusServiceUnavailable, "not authorized yet")
+		return
+	}
 	chatID, err := pathChatID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

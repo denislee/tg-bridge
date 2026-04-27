@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/gotd/td/telegram/auth"
@@ -106,4 +107,63 @@ func (a *httpAuthenticator) AcceptTermsOfService(_ context.Context, _ tg.HelpTer
 
 func (a *httpAuthenticator) SignUp(_ context.Context) (auth.UserInfo, error) {
 	return auth.UserInfo{}, errors.New("signup not supported; register the account on an official client first")
+}
+
+// runAuth replicates auth.Flow.Run but loops on an invalid password instead of
+// returning, so a wrong 2FA entry doesn't crash the daemon — the user can just
+// POST /v1/auth/password again.
+func (b *Bridge) runAuth(ctx context.Context) error {
+	ac := b.client.Auth()
+
+	status, err := ac.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("auth status: %w", err)
+	}
+	if status.Authorized {
+		return nil
+	}
+
+	phone, err := b.auth.Phone(ctx)
+	if err != nil {
+		return fmt.Errorf("get phone: %w", err)
+	}
+
+	sentCode, err := ac.SendCode(ctx, phone, auth.SendCodeOptions{})
+	if err != nil {
+		return fmt.Errorf("send code: %w", err)
+	}
+	sc, ok := sentCode.(*tg.AuthSentCode)
+	if !ok {
+		return fmt.Errorf("unexpected sent code type %T", sentCode)
+	}
+
+	code, err := b.auth.Code(ctx, sc)
+	if err != nil {
+		return fmt.Errorf("get code: %w", err)
+	}
+
+	_, signInErr := ac.SignIn(ctx, phone, code, sc.PhoneCodeHash)
+	if signInErr == nil {
+		return nil
+	}
+	if !errors.Is(signInErr, auth.ErrPasswordAuthNeeded) {
+		return fmt.Errorf("sign in: %w", signInErr)
+	}
+
+	for {
+		password, err := b.auth.Password(ctx)
+		if err != nil {
+			return fmt.Errorf("get password: %w", err)
+		}
+		_, err = ac.Password(ctx, password)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, auth.ErrPasswordInvalid) {
+			b.auth.setState(AuthNeedPass, err)
+			b.log.Warn("invalid 2FA password, awaiting retry")
+			continue
+		}
+		return fmt.Errorf("sign in with password: %w", err)
+	}
 }
