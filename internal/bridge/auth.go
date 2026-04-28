@@ -23,6 +23,9 @@ var recoverablePhoneErrs = []string{
 	"PHONE_PASSWORD_FLOOD",
 	"PHONE_CODE_EXPIRED",
 	"PHONE_CODE_EMPTY",
+	// AUTH_RESTART: server abandoned a prior partial auth; retrying from
+	// SendCode (i.e. asking the user to re-submit the phone) clears it.
+	"AUTH_RESTART",
 }
 
 // AuthState reports what the authenticator is waiting for.
